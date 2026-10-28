@@ -4,6 +4,7 @@ import Quickshell.Io
 import Quickshell.Hyprland
 import qs.Commons
 import "ui"
+import "core/DeepLink.js" as DeepLink
 
 Item {
   id: root
@@ -71,6 +72,39 @@ Item {
     return r
   }
 
+  // oma-cast:// links (core/DeepLink.js). A command that asks first still
+  // asks: a link is not the user pressing ↵. [D]
+  function openUrl(url) {
+    var link
+    try { link = DeepLink.parse(url) } catch (e) { return { ok: false, error: e.message } }
+    if (link.route === "show") {
+      root.show()
+      launcher.popToRoot()
+      launcher.setQuery(link.query)
+      return { ok: true, data: null }
+    }
+    if (link.route === "settings") {
+      root.show()
+      launcher.popToRoot()
+      launcher.push({ kind: "settings", title: "Settings" })
+      var titles = { general: "General", commands: "Commands", calculator: "Calculator", scripts: "Script Commands" }
+      if (link.page) launcher.push({ kind: "settings-page", page: link.page, title: titles[link.page] })
+      return { ok: true, data: null }
+    }
+    var payload = { id: link.id, action: "open", query: "", arguments: link.arguments }
+    var r = backend.callSync("rootSearch.performAction", payload)
+    var outcome = r.ok ? (r.data || {}) : null
+    if (outcome && outcome.close) {
+      if (outcome.hud) launcher.hud(outcome.hud)
+      return r
+    }
+    root.show()
+    launcher.popToRoot()
+    if (!r.ok) launcher.showToast("failure", r.error)
+    else launcher.handleOutcome(outcome, payload)
+    return r
+  }
+
   Backend {
     id: backend
     appLibrary: root.shell ? root.shell.appLibrary : null
@@ -130,6 +164,10 @@ Item {
 
     function run(commandId: string): string {
       return JSON.stringify(root.run(commandId))
+    }
+
+    function openUrl(url: string): string {
+      return JSON.stringify(root.openUrl(url))
     }
 
     function call(method: string, dataJson: string): string {

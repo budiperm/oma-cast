@@ -93,18 +93,43 @@ need live desktop validation.
 | `Ctrl+1`…`9` | Pick a result |
 | `↑` on an empty search | Search history |
 | `Ctrl+↑` / `Ctrl+↓` | Jump between sections |
-| `Ctrl+N` / `Ctrl+P` | Next / previous |
+| `Ctrl+N` (or `Ctrl+J` / `Ctrl+K` with vim bindings) | Next / previous |
+| `Ctrl+P` | Filter root search (All / Applications / Commands) |
+| `Tab` | Fill in a command's arguments |
+| `Ctrl+T` | Toast actions (Stop Script, Undo, Copy Error) |
+| `Ctrl+Shift+K` | About the selected command |
 | `Ctrl+Shift+F` | Add to favorites (`Ctrl+Alt+↑↓` to reorder) |
 | `Ctrl+Shift+C` | Copy |
 | `Alt+Shift+D` | Disable a command |
 | `Esc` / `Shift+Esc` | Back / back to root |
 | `Ctrl +` / `Ctrl −` / `Ctrl 0` | Zoom |
 
+## Script Commands
+
+Put an executable script in `~/.config/oma-cast/script-commands/` and it becomes a command. The headers are Raycast's, so scripts from [`raycast/script-commands`](https://github.com/raycast/script-commands) work:
+
+```bash
+#!/bin/bash
+# @raycast.schemaVersion 1
+# @raycast.title Say Hello
+# @raycast.mode compact          # fullOutput | compact | silent | inline
+# @raycast.argument1 { "type": "text", "placeholder": "Name" }
+echo "Hello $1"
+```
+
+`compact` shows the last line in a toast, `silent` closes the launcher and shows it as a HUD, `fullOutput` opens an output view, and `inline` (with `@raycast.refreshTime 1m`) puts the first line under the command's title. `@raycast.needsConfirmation true` asks before running. Settings → Script Commands lists every file and why one was skipped.
+
+## Settings
+
+Search for **oma-cast Settings**: General, Commands (aliases, favourites, enable or disable), Calculator and Script Commands. `↵` changes a setting.
+
 ## CLI
 
 ```sh
 oma-cast toggle | show | hide
 oma-cast run <commandId>         # e.g. app:com.mitchellh.ghostty, omarchy:style.theme
+oma-cast open <url>              # oma-cast://run/<commandId>?<argument>=…, oma-cast://show?query=…, oma-cast://settings
+oma-cast setup deeplinks         # make xdg-open hand oma-cast:// links to oma-cast
 oma-cast call <method> [json]    # call any backend method
 oma-cast doctor
 ```
@@ -113,9 +138,12 @@ oma-cast doctor
 
 oma-cast is early. Search, ranking and the Omarchy integration are done. Coming next:
 
-- [ ] Settings window
-- [ ] Script Commands
-- [ ] Clipboard history, snippets, quicklinks, calculator
+- [x] Calculator
+- [x] Settings
+- [x] Script Commands
+- [x] `oma-cast://` links
+- [ ] Quicklinks
+- [ ] Clipboard history, snippets
 - [ ] Running Raycast extensions built from the open-source [`raycast/extensions`](https://github.com/raycast/extensions) repo
 - [ ] Window management
 - [ ] Importing your `.rayconfig` from macOS

@@ -20,6 +20,8 @@ installed_links() {
 
 current_link() { installed_links | tail -n1; }
 hypr_dir="${XDG_CONFIG_HOME:-$HOME/.config}/hypr"
+apps_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+url_desktop="oma-cast-url.desktop"
 
 usage() {
   cat <<USAGE
@@ -29,6 +31,7 @@ Launcher
   toggle                 Show or hide the launcher
   show | hide            Show or hide it
   run <commandId>        Open a command directly
+  open <url>             Open an oma-cast:// link (run/<id>, show?query=, settings[/page])
   call <method> [json]   Call a backend method, e.g. oma-cast call system.info
 
 Setup
@@ -37,6 +40,7 @@ Setup
   reload                 Make the shell reload the plugin after editing it
   dev                    Reload the plugin on every save under plugin/
   setup hyprland         Bind Alt+Space to the launcher in ~/.config/hypr/oma-cast.lua
+  setup deeplinks        Register oma-cast:// links with xdg-open
   doctor                 Check that the pieces are in place
 USAGE
 }
@@ -89,6 +93,9 @@ cmd_uninstall() {
     [[ -n $link ]] && rm "$link" && echo "removed $link"
   done < <(installed_links)
   omarchy-shell -q shell rescanPlugins
+  if [[ -f $apps_dir/$url_desktop ]]; then
+    rm "$apps_dir/$url_desktop" && echo "removed $apps_dir/$url_desktop"
+  fi
   if [[ -L $HOME/.local/bin/oma-cast && $(readlink -f "$HOME/.local/bin/oma-cast") == "$self" ]]; then
     rm "$HOME/.local/bin/oma-cast" && echo "removed ~/.local/bin/oma-cast"
   fi
@@ -136,6 +143,26 @@ LUA
   hyprctl reload >/dev/null && echo "reloaded Hyprland; Alt+Space toggles oma-cast"
 }
 
+# oma-cast:// links: a hidden desktop entry that handles the scheme.
+cmd_setup_deeplinks() {
+  command -v xdg-mime >/dev/null || die "xdg-mime not found (xdg-utils)"
+  local cli="$HOME/.local/bin/oma-cast"
+  [[ -x $cli ]] || cli=$self
+  mkdir -p "$apps_dir"
+  cat >"$apps_dir/$url_desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=oma-cast links
+Exec=$cli open %u
+NoDisplay=true
+MimeType=x-scheme-handler/oma-cast;
+DESKTOP
+  echo "wrote $apps_dir/$url_desktop"
+  xdg-mime default "$url_desktop" x-scheme-handler/oma-cast && echo "oma-cast:// now opens with oma-cast"
+  command -v update-desktop-database >/dev/null && update-desktop-database "$apps_dir" 2>/dev/null
+  return 0
+}
+
 cmd_doctor() {
   local bad=0
   check() {
@@ -156,12 +183,18 @@ cmd_doctor() {
   else
     printf '  info  no hotkey yet; run: oma-cast setup hyprland\n'
   fi
+  if [[ $(xdg-mime query default x-scheme-handler/oma-cast 2>/dev/null) == "$url_desktop" ]]; then
+    printf '  ok    oma-cast:// links open with oma-cast\n'
+  else
+    printf '  info  oma-cast:// links are not registered; run: oma-cast setup deeplinks\n'
+  fi
   return $bad
 }
 
 case "${1:-}" in
   toggle|show|hide) need_shell; ipc "$1" >/dev/null ;;
   run) need_shell; [[ -n ${2:-} ]] || die "usage: oma-cast run <commandId>"; ipc run "$2" ;;
+  open) need_shell; [[ -n ${2:-} ]] || die "usage: oma-cast open <oma-cast://…>"; ipc openUrl "$2" ;;
   call) need_shell; [[ -n ${2:-} ]] || die "usage: oma-cast call <method> [json]"; ipc call "$2" "${3:-}" ;;
   ping) need_shell; ipc ping ;;
   install) cmd_install ;;
@@ -171,7 +204,8 @@ case "${1:-}" in
   setup)
     case "${2:-}" in
       hyprland) cmd_setup_hyprland ;;
-      *) die "usage: oma-cast setup hyprland" ;;
+      deeplinks) cmd_setup_deeplinks ;;
+      *) die "usage: oma-cast setup hyprland|deeplinks" ;;
     esac
     ;;
   doctor) cmd_doctor ;;

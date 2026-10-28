@@ -35,7 +35,7 @@ test("missing HOME is an error", () => {
 test("startup creates the persistent dirs and the runtime dir", () => {
   const p = Paths.resolve(envOf({ HOME: "/h", XDG_RUNTIME_DIR: "/r" }))
   assert.deepEqual(Paths.directoriesToCreate(p), [
-    "/h/.config/oma-cast", "/h/.local/share/oma-cast/db", "/h/.cache/oma-cast",
+    "/h/.config/oma-cast", "/h/.config/oma-cast/script-commands", "/h/.local/share/oma-cast/db", "/h/.cache/oma-cast",
     "/h/.local/state/oma-cast/logs", "/h/.local/state/oma-cast/backups", "/r/oma-cast"
   ])
 })

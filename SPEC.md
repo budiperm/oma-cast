@@ -807,6 +807,13 @@ Repo layout [D]:
 - Quicklinks (CRUD, arguments, placeholders §8.3 minus clipboard history), Web Searches/URL, System Actions P0 set (logind, wpctl, MPRIS, appearance toggle), Script Commands (§9.9).
 - Settings window: General, Launcher, Keyboard, Extensions table with alias/hotkey recorder (portal or compositor-bind writer).
 - **Accept:** `2+2`, `5 km in mi`, `100 usd in eur` work. A quicklink `https://duckduckgo.com/?q={query}` with an argument pill works. The `raycast/script-commands` samples (a few bash/python ones) run in all 4 modes. Hotkey → command works on Hyprland.
+- **Scope [D, 2026-10-22, chosen by the project owner].** Phase 2 is only:
+  - **Script Commands** (§9.9) with `argument1..3`, `inline` + `refreshTime` and `needsConfirmation`. One directory, `$XDG_CONFIG_HOME/oma-cast/script-commands`; no directory setting.
+  - **Settings view** inside the launcher with four pages: General, Commands (alias, favourite, enable/disable), Calculator (the config.json keys) and Scripts (what was found, and why a file was skipped).
+  - **Deep links**, `oma-cast://` only.
+  - **Quicklinks** move to a later phase.
+  - **Dropped for good:** System Actions, per-command hotkeys, extra script directories, `raycast://`. Don't propose them again.
+  - **Accept:** a few `raycast/script-commands` samples (bash and python) run in all 4 modes, with arguments and confirmation. Every setting can be changed from the settings view. `xdg-open 'oma-cast://run/<id>'` runs a command.
 
 ### Phase 3: Clipboard history
 - Watcher per §5.3 (data-control first, X11 second), storage per §6.4 and §8.2, list/detail UI, paste/plain-paste, Paste Sequentially, pins, retention job, OCR (tesseract), disabled apps.

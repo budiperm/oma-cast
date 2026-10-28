@@ -52,10 +52,11 @@ plugin/                  # the Omarchy shell plugin (what gets linked into ~/.co
   manifest.json          #   id typecraft.oma-cast, kind "menu" (so the shell passes shell.appLibrary), keepLoaded
   Launcher.qml           #   entry point: open()/close() from the shell, IpcHandler "oma-cast", GlobalShortcut oma-cast:toggle
   Backend.qml            #   in-process backend: paths, config.json, stores, method registry, notifications
-  ui/                    #   launcher surface and (later) views
-  services/              #   QML services that do I/O (JsonStore, OmarchyMenuSource; later clipboard, …)
+  ui/                    #   launcher surface, ActionPanel, InfoPanel (About), Alert, ResultRow
+  services/              #   QML services that do I/O (JsonStore, OmarchyMenuSource, ScriptCommandsSource, CalculatorData, AgentLauncher)
   core/*.js              #   pure logic, no Qt imports: shared by QML and node tests (module.exports guard)
-                         #   Ranker, Frecency (ref 02 §4, port exactly), OmarchyMenu, RootSearch, Schema, Migrate, Rpc, Paths, Log
+                         #   Ranker, Frecency (ref 02 §4, port exactly), OmarchyMenu, RootSearch, Schema, Migrate, Rpc, Paths, Log,
+                         #   Calculator, ScriptCommands, Settings, DeepLink, Agent
 bin/oma-cast             # bash CLI
 tests/*.test.js          # node --test unit tests for plugin/core (ranker, frecency, Omarchy menu, root search, …)
 tests/smoke.sh           # live acceptance check against the running shell
@@ -147,11 +148,16 @@ Works:
 
 **Default-agent hand-off (fork, 2026-10-20):** user-authorized addition outside the original phase plan. The root fallback "Ask default agent" and Ctrl+Alt+Enter pass the query to `omarchy-agent --prompt` as a literal argv element. `AgentLauncher.qml` checks the configured agent/terminal with a bounded, question-free preflight, prevents overlapping submissions and cancels on hide/unload. `Launcher.qml` dismisses the overlay before launching through `Util.execArgv`. Errors leave the query visible. There are no new dependencies, model APIs, credentials or question-history writes. Existing CLI approval behaviour is inherited. Portable checks do not establish live terminal focus, authentication, or provider compatibility; verify those on Omarchy.
 
+**Phase 2: done (2026-10-22)**, with the owner's scope (SPEC §12 Phase 2): no Quicklinks (later phase); System Actions, per-command hotkeys, extra script folders and `raycast://` are dropped for good.
+- **Script Commands** (`core/ScriptCommands.js`, `services/ScriptCommandsSource.qml`): one bash scan of `~/.config/oma-cast/script-commands` on every open (skips dirs, empty, > 2 MB, `.template.`, non-executable, bad headers, each with a reason). All 4 modes: `fullOutput` → output view (ANSI stripped, ↵ copies, leaving it stops the script), `compact` → sticky "Running…" toast with Stop (Ctrl+T), then the last line; `silent` → close + HUD; `inline` → first line as subtitle, refreshed on `refreshTime` while open. `argument1..3` (text, password masked, dropdown via the popup), `percentEncoded`, `needsConfirmation` (alert). Scripts run directly with the shell's environment, cwd = `currentDirectoryPath` [D]. RPC `scripts.list|reload|getRun|stop|forget`.
+- **Settings view** (`core/Settings.js`): the "oma-cast Settings" command pushes General / Commands / Calculator / Script Commands pages built from the normal list. ↵ opens a setting's options in the dropdown, flips a toggle, or pushes a number input. General settings go to settings.json, the rest to config.json (`settings.updateConfig` keeps unknown keys). The Commands page lists every command, disabled first, to enable/disable, alias and favourite.
+- **Deep links** (`core/DeepLink.js`): `oma-cast://run/<id>?<arg>=…`, `show?query=`, `settings[/page]`. `oma-cast open <url>`; `oma-cast setup deeplinks` registers the scheme (hidden desktop entry + `xdg-mime`), doctor checks it, uninstall removes it. A link still gets the confirm alert where ↵ would [D].
+
 Stubbed / not yet:
-- No settings window, so you can't re-enable a disabled command except with Undo on the toast (Ctrl+T) or by editing `~/.local/share/oma-cast/db/settings.json` (delete its `enabled: false`). That's Phase 2.
-- No deep links (`oma-cast://`); Phase 2 or 9.
+- Quicklinks (deferred by the owner to a later phase).
 
 Won't do (decided 2026-10-22):
+- Phase 2: System Actions, per-command hotkeys, extra script directories, `raycast://` links.
 - Keystroke buffering. Keys sent within ~40 ms of the hotkey go to the window underneath; fixing it needs a parked surface, which Omarchy avoids (SPEC §12 Phase 1).
 - Calculator: Color, Weather and Flight results, crypto, pinned history entries and a history detail pane. Trig takes radians unless given `°`/`deg` [D].
 

@@ -12,6 +12,8 @@ import "core/OmarchyMenu.js" as OmarchyMenu
 import "core/RootSearch.js" as RootSearch
 import "core/Agent.js" as Agent
 import "core/Calculator.js" as Calculator
+import "core/ScriptCommands.js" as ScriptCommands
+import "core/Settings.js" as Settings
 import "services"
 
 Item {
@@ -35,7 +37,7 @@ Item {
   property var candidates: []
   property var candidatesById: ({})
   property int candidatesRevision: 0
-  readonly property bool loading: menuSource.loading || agentLauncher.checking
+  readonly property bool loading: menuSource.loading || agentLauncher.checking || scriptSource.scanning
   // Bumped when exchange rates or zone offsets arrive, so an open
   // calculator row re-evaluates.
   readonly property int calculatorRevision: (calculatorData.rates ? 1 : 0) + calculatorData.ratesFetchedAt + calculatorData.zonesAt
@@ -76,6 +78,11 @@ Item {
     for (var i = 0; i < apps.length; i++) if (apps[i] && apps[i].id) next.push(RootSearch.appCandidate(apps[i]))
     next = next.concat(RootSearch.menuCandidates(menuSource.tree, menuSource.guards, menuSource.providerItems, backend.deps))
     for (var b = 0; b < RootSearch.BUILTINS.length; b++) next.push(RootSearch.builtinCandidate(RootSearch.BUILTINS[b]))
+    for (var s = 0; s < scriptSource.scripts.length; s++) {
+      var script = scriptSource.scripts[s]
+      var inline = scriptSource.inline[script.id]
+      next.push(ScriptCommands.candidate(script, inline ? inline.text : ""))
+    }
     var byId = ({})
     for (var j = 0; j < next.length; j++) byId[next[j].id] = next[j]
     backend.candidates = next
@@ -212,6 +219,120 @@ Item {
     backend.emit("settings.commandSettingsChanged", { commandId: id })
   }
 
+  // ------------------------------------------------------- script commands
+
+  function runScript(candidate, data, query) {
+    var script = scriptSource.script(candidate.id)
+    if (!script) throw new Error(candidate.title + " is no longer in " + backend.paths.scriptCommands)
+    if (script.mode === "inline") {
+      var inl = Object.assign({}, scriptSource.inline); delete inl[script.id]; scriptSource.inline = inl
+      scriptSource.refreshInline(Date.now())
+      return { toast: { style: "success", title: "Refreshing " + script.title } }
+    }
+    var argv = ScriptCommands.argv(script, (data && data.arguments) || {})
+    backend.recordVisit(candidate.id, query)
+    var runId = scriptSource.start(script, argv, false)
+    if (script.mode === "fullOutput") return { push: { kind: "script-output", title: script.title, runId: runId, scriptId: script.id } }
+    if (script.mode === "silent") return { close: true }
+    return { toast: { style: "loading", title: "Running " + script.title + "…", sticky: true, actions: [
+      { id: "stop", title: "Stop Script", call: { method: "scripts.stop", data: { runId: runId } } }
+    ] } }
+  }
+
+  // compact and silent runs end in a toast or HUD (ref 03 §5 output table).
+  function scriptFinished(runId) {
+    var run = scriptSource.runs[runId]
+    if (!run) return
+    var ok = run.exitCode === 0
+    var line = ScriptCommands.lastLine(run.output)
+    backend.emit("scripts.runFinished", {
+      runId: runId, mode: run.mode, ok: ok,
+      title: line || (ok ? run.title + " finished" : run.title + " failed (exit code " + run.exitCode + ")")
+    })
+    if (run.mode !== "fullOutput") scriptSource.forget(runId)
+  }
+
+  // ---------------------------------------------------------- settings view
+
+  // config.json keeps keys we don't know; we only replace the ones we write.
+  function updateConfig(patch) {
+    var current = ({})
+    try { current = JSON.parse(configFile.text() || "{}") } catch (e) { throw new Error("config.json is not valid JSON; fix it by hand first") }
+    for (var key in patch) {
+      if (Schema.configDefaults[key] === undefined) throw new Error("Unknown config key " + key)
+      if (!Schema.validConfigValue(key, patch[key])) throw new Error("Invalid value for " + key)
+      current[key] = patch[key]
+    }
+    configFile.setText(JSON.stringify(current, null, 2) + "\n")
+    backend.config = Schema.withConfigDefaults(current)
+    backend.emit("settings.configChanged", backend.config)
+    return backend.config
+  }
+
+  function settingsRows(view, query) {
+    if (view.kind === "settings") return Settings.pageRows(query)
+    var general = settingsStore.doc.general
+    switch (view.page) {
+      case "commands": return Settings.commandRows(backend.candidates, settingsStore.doc.commands, query)
+      case "scripts": return Settings.scriptRows(backend.paths.scriptCommands, scriptSource.scripts, scriptSource.skipped, query)
+      default: return Settings.fieldRows(view.page, query, general, backend.config)
+    }
+  }
+
+  function settingsRow(id) {
+    var kind = String(id).split(":")[0]
+    var view = kind === "settings-page" ? { kind: "settings" }
+      : kind === "setting" ? { kind: "settings-page", page: String(id).slice(8).split(".")[0] }
+      : kind === "command-setting" ? { kind: "settings-page", page: "commands" }
+      : { kind: "settings-page", page: "scripts" }
+    var rows = backend.settingsRows(view, "")
+    for (var i = 0; i < rows.length; i++) if (rows[i].id === id) return rows[i]
+    return null
+  }
+
+  function isSettingsRow(id) { return /^(settings-page|setting|command-setting|scripts|script-file):/.test(String(id)) }
+
+  function writeSetting(id, raw) {
+    var f = Settings.fieldById(id)
+    if (!f) throw new Error("Unknown setting " + id)
+    var value = Settings.parseValue(f, raw)
+    var patch = ({}); patch[f.key] = value
+    if (f.store === "general") {
+      var r = backend.callSync("settings.updateGeneralSettings", patch)
+      if (!r.ok) throw new Error(r.error)
+    } else backend.updateConfig(patch)
+    return { toast: { style: "success", title: f.title + ": " + Settings.valueLabel(f, value) } }
+  }
+
+  function settingsAction(id, action, data) {
+    var row = backend.settingsRow(id)
+    if (!row) throw new Error("Unknown setting " + id)
+    if (action === "set") return backend.writeSetting(id, data.value)
+    switch (row.kind) {
+      case "settings-page":
+        return { push: { kind: "settings-page", page: row.page, title: row.title } }
+      case "setting":
+        if (row.control === "toggle") return backend.writeSetting(id, !row.value)
+        var f = Settings.fieldById(id)
+        if (row.control === "number") return { push: { kind: "input", title: f.title, hint: f.subtitle, value: String(row.value), settingId: id } }
+        return { choose: { id: id, title: f.title, value: row.value, options: f.options } }
+      case "command-setting":
+        if (action === "open") {
+          backend.updateCommand(row.commandId, function(s) { if (row.disabled) delete s.enabled; else s.enabled = false; return s })
+          return { toast: { style: "success", title: row.title + (row.disabled ? " enabled" : " disabled") } }
+        }
+        return backend.performAction({ id: row.commandId, action: action })
+      case "scripts-action":
+        if (id === "scripts:open-folder") { Util.execArgv(["xdg-open", backend.paths.scriptCommands]); return { close: true } }
+        scriptSource.refresh()
+        return { toast: { style: "success", title: "Reloading Script Commands" } }
+      case "script-file":
+        Util.execArgv(["omarchy-launch-editor", row.path])
+        return { close: true }
+    }
+    throw new Error("Cannot open " + id)
+  }
+
   function omarchyRouteFor(candidate) {
     if (candidate.kind === "omarchy-action") {
       var item = menuSource.tree.items[candidate.menuId]
@@ -263,6 +384,8 @@ Item {
         case "fallback":
           Util.execArgv(["omarchy-launch-browser", RootSearch.fallbackUrl(candidate, query)])
           return { close: true }
+        case "script":
+          return backend.runScript(candidate, data, query)
       }
       throw new Error("Cannot open " + id)
     }
@@ -271,6 +394,12 @@ Item {
       case "open-in-omarchy-menu":
         backend.summonPlugin("omarchy.menu", JSON.stringify({ menu: backend.omarchyRouteFor(candidate) }))
         return { close: true }
+      case "edit-script":
+        Util.execArgv(["omarchy-launch-editor", candidate.scriptPath])
+        return { close: true }
+      case "copy-path":
+        Util.execArgv(["wl-copy", "--", candidate.scriptPath])
+        return { close: true, hud: "Copied to Clipboard" }
       case "copy-command":
       case "copy-id":
         Util.execArgv(["wl-copy", "--", action === "copy-id" ? candidate.appId + ".desktop" : candidate.action])
@@ -359,6 +488,8 @@ Item {
         backend.emit("settings.generalSettingsChanged", settingsStore.doc.general)
         return settingsStore.doc.general
       },
+      getConfig: function() { return backend.config },
+      updateConfig: function(data) { return backend.updateConfig(data && typeof data === "object" ? data : {}) },
       getAllCommandSettings: function() { return settingsStore.doc.commands },
       getCommandSettings: function(data) { return settingsStore.doc.commands[String(data && data.commandId || "")] || {} },
       updateCommandSettings: function(data) {
@@ -387,6 +518,10 @@ Item {
         var view = data && data.view
         var ctx = backend.searchContext()
         var sections
+        if (view && (view.kind === "settings" || view.kind === "settings-page")) {
+          var rows = backend.settingsRows(view, query)
+          return rows.length ? [{ id: "settings", title: "", rows: rows }] : []
+        }
         if (view && view.kind === "menu") sections = RootSearch.submenuSections(backend.candidates, view.menuId, query, ctx, backend.deps)
         else if (view && view.kind === "calculator-history") sections = RootSearch.historySections(calculatorStore.doc.history, query, ctx.nowMs, Calculator.filterHistory)
         else {
@@ -402,6 +537,10 @@ Item {
         var rowId = String(data && data.id || "")
         if (rowId === RootSearch.CALCULATOR_ID) return RootSearch.actionsFor({ kind: "calculator" })
         if (rowId.indexOf("calculator-history:") === 0) return RootSearch.actionsFor({ kind: "calculator-history" })
+        if (backend.isSettingsRow(rowId)) {
+          var row = backend.settingsRow(rowId)
+          return row ? Settings.actionsFor(row) : []
+        }
         var candidate = backend.decorated(rowId)
         if (!candidate) {
           var fallback = RootSearch.FALLBACKS.filter(function(f) { return f.id === data.id })[0]
@@ -432,7 +571,8 @@ Item {
       performAction: function(data) {
         // Destructive commands come back as a confirmation unless confirmed.
         if (!(data && data.confirmed)) {
-          var confirm = RootSearch.confirmationFor(String(data && data.id || ""), String(data && data.action || "open"))
+          var target = backend.candidatesById[String(data && data.id || "")]
+          var confirm = RootSearch.confirmationFor(String(data && data.id || ""), String(data && data.action || "open"), target)
           if (confirm) return { confirm: confirm }
         }
         var fallback = RootSearch.FALLBACKS.filter(function(f) { return f.id === (data && data.id) })[0]
@@ -444,6 +584,7 @@ Item {
           Util.execArgv(["omarchy-launch-browser", RootSearch.fallbackUrl(fallback, data.query)])
           return { close: true }
         }
+        if (data && backend.isSettingsRow(data.id)) return backend.settingsAction(String(data.id), String(data.action || "open"), data)
         // The calculator row is the query itself, evaluated again.
         if (data && data.id === RootSearch.CALCULATOR_ID) {
           var calc = backend.calculate(String(data.query || ""))
@@ -484,6 +625,26 @@ Item {
       }
     })
 
+    // Names after Raycast's script-commands built-in (ref 03 §5). [I]
+    Rpc.register(backend.registry, "scripts", {
+      list: function() {
+        return { directory: backend.paths.scriptCommands, scripts: scriptSource.scripts, skipped: scriptSource.skipped, inline: scriptSource.inline }
+      },
+      reload: function() { scriptSource.refresh(); return null },
+      // Output without ANSI colours: the view draws plain text. [D]
+      getRun: function(data) {
+        var run = scriptSource.runs[String(data && data.runId || "")]
+        return run ? Object.assign({}, run, { output: ScriptCommands.stripAnsi(run.output) }) : null
+      },
+      stop: function(data) { scriptSource.stop(String(data && data.runId || "")); return null },
+      forget: function(data) {
+        var id = String(data && data.runId || "")
+        scriptSource.stop(id)
+        scriptSource.forget(id)
+        return null
+      }
+    })
+
     Rpc.register(backend.registry, "frecency", {
       visit: function(data) { backend.recordVisit(String(data.id), String(data.query || "")); return null },
       get: function(data) {
@@ -516,9 +677,29 @@ Item {
   onNotification: function(method, data) {
     if (method === "window.visibilityChanged" && data && data.visible) {
       menuSource.refresh()
+      scriptSource.refresh()
       calculatorData.refresh()
     }
     if (method === "window.visibilityChanged" && data && !data.visible) agentLauncher.cancel()
+    if (method === "window.visibilityChanged") inlineTimer.running = !!(data && data.visible)
+  }
+
+  ScriptCommandsSource {
+    id: scriptSource
+    dir: backend.directoriesReady ? backend.paths.scriptCommands : ""
+    onDirChanged: refresh()
+    onRevisionChanged: rebuildTimer.restart()
+    onRunUpdated: function(runId) { backend.emit("scripts.runUpdated", { runId: runId }) }
+    onRunFinished: function(runId) { backend.scriptFinished(runId) }
+    onMessage: function(level, text, metadata) { backend.log(level, "scripts", text, metadata) }
+  }
+
+  // Inline scripts refresh on their refreshTime while the launcher is open.
+  Timer {
+    id: inlineTimer
+    interval: 5000
+    repeat: true
+    onTriggered: scriptSource.refreshInline(Date.now())
   }
 
   AgentLauncher {
@@ -581,6 +762,7 @@ Item {
   Connections { target: calculatorStore; function onChanged() { backend.storeRevision++ } }
 
   FileView {
+    id: configFile
     path: backend.directoriesReady ? backend.paths.configFile : ""
     watchChanges: true
     printErrors: false

@@ -78,7 +78,8 @@ var configDefaults = {
 
 // Values a config key or general setting may take, beyond its type.
 var configChoices = {
-  clockFormat: ["auto", "12h", "24h"]
+  clockFormat: ["auto", "12h", "24h"],
+  logLevel: ["trace", "debug", "info", "warning", "error", "fatal"]
 }
 
 var generalChoices = {
@@ -116,6 +117,7 @@ if (typeof module !== "undefined") {
     documents: documents,
     configDefaults: configDefaults,
     generalChoices: generalChoices,
+    validConfigValue: validConfigValue,
     withConfigDefaults: withConfigDefaults
   }
 }

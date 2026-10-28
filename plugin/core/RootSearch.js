@@ -40,6 +40,15 @@ var BUILTINS = [
     keywords: ["calculator", "calc", "math", "history", "conversions"],
     run: { push: { kind: "calculator-history", title: "Calculator History" } },
     rootSearch: { when: "always" }
+  },
+  {
+    id: "builtin:settings",
+    title: "oma-cast Settings",
+    subtitle: "oma-cast",
+    glyph: "\uf013",                     // nf-fa-cog
+    keywords: ["settings", "preferences", "config", "options"],
+    run: { push: { kind: "settings", title: "Settings" } },
+    rootSearch: { when: "always" }
   }
 ]
 
@@ -309,6 +318,7 @@ function actionsFor(candidate) {
     case "omarchy-menu":
     case "omarchy-link": primary = { id: "open", title: "Open Menu", icon: "" }; break
     case "fallback": primary = { id: "open", title: candidate.title, icon: "" }; break
+    case "script": primary = { id: "open", title: candidate.mode === "inline" ? "Refresh" : "Run Script", icon: "" }; break
     default: primary = { id: "open", title: "Open Command", icon: "" }
   }
   primary.shortcut = "↵"
@@ -321,6 +331,10 @@ function actionsFor(candidate) {
 
   if (candidate.kind === "app") list.push({ id: "copy-id", title: "Copy Desktop ID", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
   if (candidate.kind === "omarchy-action") list.push({ id: "copy-command", title: "Copy Command", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
+  if (candidate.kind === "script") {
+    list.push({ id: "edit-script", title: "Edit Script", shortcut: "Ctrl E", section: "primary", icon: "" })
+    list.push({ id: "copy-path", title: "Copy Script Path", shortcut: "Ctrl Shift C", section: "copy", icon: "" })
+  }
 
   if (candidate.favoriteOrder === null || candidate.favoriteOrder === undefined) {
     list.push({ id: "favorite-add", title: "Add to Favorites", shortcut: "Ctrl Shift F", section: "favorites", icon: "" })
@@ -380,8 +394,12 @@ var CONFIRMATIONS = {
   "omarchy:system.logout": { title: "Log Out", message: "Are you sure you want to log out?", primary: "Log Out" }
 }
 
-function confirmationFor(id, action) {
+// candidate is optional: a script command asks when its header says
+// `needsConfirmation true` (ref 03 §5) [O].
+function confirmationFor(id, action, candidate) {
   var c = action === "open" ? CONFIRMATIONS[id] : null
+  if (action === "open" && candidate && candidate.kind === "script" && candidate.needsConfirmation)
+    return { title: candidate.title, message: "Are you sure you want to run this script?", primary: "Run Script", destructive: false }
   if (action === "delete-all-entries") c = { title: "Delete All Entries", message: "This removes every calculation from Calculator History.", primary: "Delete All" }
   return c ? { title: c.title, message: c.message, primary: c.primary, destructive: true } : null
 }
@@ -411,6 +429,7 @@ function aboutFor(c, nowMs) {
   add("ID", c.id)
   if (c.kind === "app") add("Desktop Entry", c.appId + ".desktop")
   if (c.kind === "omarchy-action") add("Command", c.action)
+  if (c.kind === "script") { add("Script", c.scriptPath); add("Mode", c.mode) }
   if (c.kind === "omarchy-link") add("Opens", c.target)
   add("URL", c.url || (c.run && c.run.url))
   add("Arguments", (c.arguments || []).map(function(a) { return a.name + (a.required ? "" : " (optional)") }).join(", "))

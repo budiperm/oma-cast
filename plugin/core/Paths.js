@@ -38,7 +38,7 @@ function resolve(env) {
 }
 
 function directoriesToCreate(paths) {
-  return [paths.config, paths.db, paths.cache, paths.logs, paths.backups, paths.runtime]
+  return [paths.config, paths.scriptCommands, paths.db, paths.cache, paths.logs, paths.backups, paths.runtime]
 }
 
 if (typeof module !== "undefined") {
